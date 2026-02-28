@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import { ChatMessage } from '@/lib/data';
 import { sendMessage } from '@/lib/ai-service';
-import { Send, Bot, User, Key, Loader2, AlertCircle } from 'lucide-react';
+import { Send, Bot, User, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 const SUGGESTIONS = [
@@ -16,8 +16,6 @@ const SUGGESTIONS = [
 const AIBotPage = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('tensor-teach-api-key') || '');
-  const [showKeyInput, setShowKeyInput] = useState(() => !localStorage.getItem('tensor-teach-api-key'));
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -25,21 +23,9 @@ const AIBotPage = () => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, loading]);
 
-  const saveKey = () => {
-    if (!apiKey.trim()) return;
-    localStorage.setItem('tensor-teach-api-key', apiKey.trim());
-    setShowKeyInput(false);
-    toast.success('API key saved securely');
-  };
-
   const handleSend = async (text?: string) => {
     const msg = text || input.trim();
     if (!msg || loading) return;
-    if (!apiKey) {
-      setShowKeyInput(true);
-      toast.error('Please enter your OpenRouter API key first');
-      return;
-    }
 
     const newMessages: ChatMessage[] = [...messages, { role: 'user', content: msg }];
     setMessages(newMessages);
@@ -47,7 +33,7 @@ const AIBotPage = () => {
     setLoading(true);
 
     try {
-      const reply = await sendMessage(newMessages, apiKey);
+      const reply = await sendMessage(newMessages);
       setMessages([...newMessages, { role: 'assistant', content: reply }]);
     } catch (err: any) {
       toast.error(err.message || 'Failed to get AI response');
@@ -75,44 +61,7 @@ const AIBotPage = () => {
             <p className="text-[10px] text-muted-foreground">Powered by OpenRouter</p>
           </div>
         </div>
-        <button
-          onClick={() => setShowKeyInput(!showKeyInput)}
-          className="p-2 rounded-lg hover:bg-secondary transition-colors"
-        >
-          <Key className={`w-4 h-4 ${apiKey ? 'text-green-400' : 'text-muted-foreground'}`} />
-        </button>
       </div>
-
-      {/* API Key Input */}
-      <AnimatePresence>
-        {showKeyInput && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-b border-border"
-          >
-            <div className="p-4 flex gap-2">
-              <input
-                type="password"
-                value={apiKey}
-                onChange={e => setApiKey(e.target.value)}
-                placeholder="Enter OpenRouter API Key"
-                className="flex-1 px-3 py-2 text-sm rounded-lg bg-secondary border border-border focus:border-primary outline-none text-foreground"
-              />
-              <button
-                onClick={saveKey}
-                className="px-4 py-2 rounded-lg gradient-bg text-primary-foreground text-sm font-medium"
-              >
-                Save
-              </button>
-            </div>
-            <p className="px-4 pb-3 text-[10px] text-muted-foreground flex items-center gap-1">
-              <AlertCircle className="w-3 h-3" /> Get your key at openrouter.ai — stored locally only
-            </p>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
