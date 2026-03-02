@@ -14,7 +14,74 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      exam_questions: {
+        Row: {
+          created_at: string
+          id: string
+          marks: number | null
+          question_number: number | null
+          question_text: string
+          source_pdf: string | null
+          subject: string
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          marks?: number | null
+          question_number?: number | null
+          question_text: string
+          source_pdf?: string | null
+          subject: string
+          year: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          marks?: number | null
+          question_number?: number | null
+          question_text?: string
+          source_pdf?: string | null
+          subject?: string
+          year?: number
+        }
+        Relationships: []
+      }
+      exam_topics: {
+        Row: {
+          confidence: number | null
+          created_at: string
+          id: string
+          name: string
+          question_id: string
+          subject: string
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          name: string
+          question_id: string
+          subject: string
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string
+          id?: string
+          name?: string
+          question_id?: string
+          subject?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_topics_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "exam_questions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
