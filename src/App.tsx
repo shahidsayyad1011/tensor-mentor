@@ -10,6 +10,7 @@ import AIBotPage from "./pages/AIBotPage";
 import LearningPathPage from "./pages/LearningPathPage";
 import CoursesPage from "./pages/CoursesPage";
 import ProfilePage from "./pages/ProfilePage";
+import ExamPrepPage from "./pages/ExamPrepPage";
 import BottomNav from "./components/BottomNav";
 import NotFound from "./pages/NotFound";
 
@@ -29,6 +30,7 @@ const AppContent = () => {
         <Route path="/ai-bot" element={<AIBotPage />} />
         <Route path="/learning-path" element={<LearningPathPage />} />
         <Route path="/courses" element={<CoursesPage />} />
+        <Route path="/exam-prep" element={<ExamPrepPage />} />
         <Route path="/profile" element={<ProfilePage profile={profile} onClear={clearProfile} />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
