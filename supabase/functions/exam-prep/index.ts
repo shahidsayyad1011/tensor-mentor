@@ -81,9 +81,15 @@ async function handleUpload(req: Request, supabase: any) {
     return jsonResponse({ error: "AI not configured" }, 500);
   }
 
-  // Convert PDF to base64 for AI processing
+  // Convert PDF to base64 for AI processing (chunked to avoid stack overflow)
   const arrayBuffer = await file.arrayBuffer();
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  const base64 = btoa(binary);
 
   // Use Gemini to extract questions from the PDF
   console.log("Extracting questions from PDF via AI...");
