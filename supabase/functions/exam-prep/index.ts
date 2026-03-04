@@ -19,35 +19,25 @@ Deno.serve(async (req) => {
 
   const url = new URL(req.url);
   const pathParts = url.pathname.split("/").filter(Boolean);
-  // Path after /exam-prep: e.g. ["exam-prep", "upload"] or ["exam-prep", "analytics", "EVS", "frequencies"]
   const action = pathParts[1] || "";
 
   try {
-    // ── UPLOAD: POST /exam-prep/upload ──
     if (action === "upload" && req.method === "POST") {
       return await handleUpload(req, supabase);
     }
-
-    // ── SUBJECTS: GET /exam-prep/subjects ──
     if (action === "subjects" && req.method === "GET") {
       return await handleListSubjects(supabase);
     }
-
-    // ── ANALYTICS: GET /exam-prep/analytics/{subject}/frequencies ──
     if (action === "analytics") {
       const subject = decodeURIComponent(pathParts[2] || "");
       const subAction = pathParts[3] || "frequencies";
       return await handleAnalytics(supabase, subject, subAction, url.searchParams);
     }
-
-    // ── NOTES: GET /exam-prep/notes/{subject} ──
     if (action === "notes") {
       const subject = decodeURIComponent(pathParts[2] || "");
       const topicName = pathParts[3] ? decodeURIComponent(pathParts[3]) : null;
       return await handleNotes(subject, topicName, url.searchParams, supabase);
     }
-
-    // ── YOUTUBE: GET /exam-prep/youtube/... ──
     if (action === "youtube") {
       const subAction = pathParts[2] || "";
       if (subAction === "search") {
@@ -86,28 +76,30 @@ async function handleUpload(req: Request, supabase: any) {
     return jsonResponse({ error: "file, subject, and year are required" }, 400);
   }
 
-  // Extract text from PDF using basic approach
-  const arrayBuffer = await file.arrayBuffer();
-  const rawText = extractTextFromPdfBytes(new Uint8Array(arrayBuffer));
-
-  if (!rawText.trim()) {
-    return jsonResponse(
-      { error: "Could not extract text from PDF. Make sure it's a text-based PDF." },
-      422
-    );
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+  if (!LOVABLE_API_KEY) {
+    return jsonResponse({ error: "AI not configured" }, 500);
   }
 
-  // Parse questions
-  const questions = parseQuestions(rawText);
+  // Convert PDF to base64 for AI processing
+  const arrayBuffer = await file.arrayBuffer();
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+
+  // Use Gemini to extract questions from the PDF
+  console.log("Extracting questions from PDF via AI...");
+  const questions = await extractQuestionsFromPdfAI(base64, subject, LOVABLE_API_KEY);
+
   if (questions.length === 0) {
     return jsonResponse(
-      { error: "No questions could be identified from the PDF." },
+      { error: "No questions could be extracted from the PDF. Ensure it contains exam questions." },
       422
     );
   }
 
+  console.log(`Extracted ${questions.length} questions from PDF`);
+
   // Save questions to DB
-  const questionRows = questions.map((q, i) => ({
+  const questionRows = questions.map((q: string, i: number) => ({
     subject,
     year,
     question_text: q,
@@ -125,29 +117,22 @@ async function handleUpload(req: Request, supabase: any) {
   // Extract topics via AI
   let totalTopics = 0;
   let failed = 0;
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
-  if (LOVABLE_API_KEY) {
-    for (const q of savedQuestions) {
-      try {
-        const topics = await extractTopicsAI(
-          q.question_text,
+  for (const q of savedQuestions) {
+    try {
+      const topics = await extractTopicsAI(q.question_text, subject, LOVABLE_API_KEY);
+      if (topics.length > 0) {
+        const topicRows = topics.map((t: any) => ({
+          question_id: q.id,
+          name: t.name,
           subject,
-          LOVABLE_API_KEY
-        );
-        if (topics.length > 0) {
-          const topicRows = topics.map((t: any) => ({
-            question_id: q.id,
-            name: t.name,
-            subject,
-            confidence: t.confidence || 0.8,
-          }));
-          await supabase.from("exam_topics").insert(topicRows);
-          totalTopics += topics.length;
-        }
-      } catch {
-        failed++;
+          confidence: t.confidence || 0.8,
+        }));
+        await supabase.from("exam_topics").insert(topicRows);
+        totalTopics += topics.length;
       }
+    } catch {
+      failed++;
     }
   }
 
@@ -162,55 +147,76 @@ async function handleUpload(req: Request, supabase: any) {
   });
 }
 
-// ─── PDF TEXT EXTRACTION ──────────────────────────────────────────────────────
-function extractTextFromPdfBytes(bytes: Uint8Array): string {
-  // Basic PDF text extraction - handles text-based PDFs
-  const text = new TextDecoder("latin1").decode(bytes);
-  const textBlocks: string[] = [];
+// ─── AI-BASED PDF QUESTION EXTRACTION ────────────────────────────────────────
+async function extractQuestionsFromPdfAI(
+  base64Pdf: string,
+  subject: string,
+  apiKey: string
+): Promise<string[]> {
+  const prompt = `You are an expert academic exam paper parser. Extract ALL individual questions from this exam paper PDF.
 
-  // Extract text between BT...ET blocks
-  const btPattern = /BT\s([\s\S]*?)ET/g;
-  let match;
-  while ((match = btPattern.exec(text)) !== null) {
-    const block = match[1];
-    // Extract text from Tj and TJ operators
-    const tjPattern = /\(([^)]*)\)\s*Tj/g;
-    let tjMatch;
-    while ((tjMatch = tjPattern.exec(block)) !== null) {
-      textBlocks.push(tjMatch[1]);
+Subject: ${subject}
+
+Instructions:
+- Extract each question as a complete, standalone text
+- Include the full question text including sub-parts (a, b, c, etc.)
+- Remove question numbers from the beginning but keep the content intact
+- Do NOT include instructions like "Answer any 5 questions" or headers
+- Each question should be a meaningful academic question (at least 15 characters)
+
+Return ONLY a valid JSON array of strings. No explanation, no markdown.
+Example: ["What is polymorphism in OOP? Explain with example.", "Define normalization. Explain 1NF, 2NF and 3NF."]`;
+
+  try {
+    const resp = await fetch(AI_GATEWAY, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:application/pdf;base64,${base64Pdf}`,
+                },
+              },
+            ],
+          },
+        ],
+        temperature: 0.1,
+        max_tokens: 4000,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      console.error("AI PDF extraction failed:", resp.status, errText);
+      return [];
     }
-    // TJ arrays
-    const tjArrayPattern = /\[([^\]]*)\]\s*TJ/g;
-    let arrMatch;
-    while ((arrMatch = tjArrayPattern.exec(block)) !== null) {
-      const innerPattern = /\(([^)]*)\)/g;
-      let innerMatch;
-      while ((innerMatch = innerPattern.exec(arrMatch[1])) !== null) {
-        textBlocks.push(innerMatch[1]);
-      }
+
+    const data = await resp.json();
+    let raw = data.choices?.[0]?.message?.content?.trim() || "[]";
+
+    // Clean markdown code blocks if present
+    if (raw.startsWith("```")) {
+      raw = raw.split("```")[1];
+      if (raw.startsWith("json")) raw = raw.slice(4);
     }
+
+    const parsed = JSON.parse(raw.trim());
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((q: any) => typeof q === "string" && q.trim().length > 15);
+  } catch (e) {
+    console.error("PDF extraction parse error:", e);
+    return [];
   }
-
-  // Also try stream-based extraction as fallback
-  if (textBlocks.length === 0) {
-    // Try to find readable text sequences
-    const readablePattern = /[A-Za-z0-9\s,.;:?!()'"/-]{20,}/g;
-    let readable;
-    while ((readable = readablePattern.exec(text)) !== null) {
-      textBlocks.push(readable[0].trim());
-    }
-  }
-
-  return textBlocks.join("\n");
-}
-
-function parseQuestions(rawText: string): string[] {
-  const pattern =
-    /(?:^|\n)\s*(?:Q\.?\s*\d+|Question\s+\d+|\(\d+\)|\d+[\.\)])\s*/gi;
-  const parts = rawText.split(pattern);
-  return parts
-    .map((p) => p.trim())
-    .filter((p) => p.length > 15);
 }
 
 // ─── AI TOPIC EXTRACTION ─────────────────────────────────────────────────────
@@ -219,13 +225,13 @@ async function extractTopicsAI(
   subject: string,
   apiKey: string
 ): Promise<Array<{ name: string; confidence: number }>> {
-  const prompt = `You are an academic topic extractor. Extract key topics from this question.
+  const prompt = `You are an academic topic extractor. Extract key topics from this exam question.
 Subject: ${subject}
 Question: ${questionText}
 
 Return ONLY a valid JSON array. No explanation.
 [{"name": "Topic Name", "confidence": 0.95}]
-Rules: Max 4 topics, specific academic concepts, confidence 0.0-1.0.`;
+Rules: Max 4 topics, use specific academic concepts relevant to ${subject}, confidence 0.0-1.0.`;
 
   const resp = await fetch(AI_GATEWAY, {
     method: "POST",
@@ -271,7 +277,6 @@ async function handleListSubjects(supabase: any) {
     .order("subject");
 
   if (error) throw new Error(error.message);
-
   const unique = [...new Set((data || []).map((d: any) => d.subject))];
   return jsonResponse({ total: unique.length, subjects: unique });
 }
@@ -284,7 +289,6 @@ async function handleAnalytics(
   params: URLSearchParams
 ) {
   if (subAction === "stats") {
-    // Get stats
     const { data: questions } = await supabase
       .from("exam_questions")
       .select("id, year")
@@ -298,7 +302,6 @@ async function handleAnalytics(
     const uniqueTopics = [...new Set((topics || []).map((t: any) => t.name))];
     const years = [...new Set((questions || []).map((q: any) => q.year))].sort();
 
-    // Most repeated topic
     const freq: Record<string, number> = {};
     (topics || []).forEach((t: any) => {
       freq[t.name] = (freq[t.name] || 0) + 1;
@@ -316,7 +319,6 @@ async function handleAnalytics(
     });
   }
 
-  // frequencies or high-frequency
   const limit = parseInt(params.get("limit") || "10");
   const minFrequency = parseInt(params.get("min_frequency") || "1");
 
@@ -329,7 +331,6 @@ async function handleAnalytics(
     return jsonResponse({ error: `No topic data found for '${subject}'` }, 404);
   }
 
-  // Aggregate frequencies
   const freq: Record<string, { count: number; questionIds: Set<string> }> = {};
   topics.forEach((t: any) => {
     if (!freq[t.name]) freq[t.name] = { count: 0, questionIds: new Set() };
@@ -337,7 +338,7 @@ async function handleAnalytics(
     freq[t.name].questionIds.add(t.question_id);
   });
 
-  let results = Object.entries(freq)
+  const results = Object.entries(freq)
     .map(([name, data]) => ({
       topic_name: name,
       subject,
@@ -362,12 +363,10 @@ async function handleNotes(
     return jsonResponse({ error: "AI not configured" }, 500);
 
   if (topicName) {
-    // Single topic notes
     const notes = await generateNotesAI(topicName, subject, 1, LOVABLE_API_KEY);
     return jsonResponse(notes);
   }
 
-  // Get top topics
   const limit = parseInt(params.get("limit") || "5");
   const { data: topics } = await supabase
     .from("exam_topics")
@@ -484,7 +483,6 @@ async function handleYouTube(
     });
   }
 
-  // Get top topics and search for each
   const limit = parseInt(params.get("limit") || "5");
   const videosPerTopic = parseInt(params.get("videos_per_topic") || "3");
 
