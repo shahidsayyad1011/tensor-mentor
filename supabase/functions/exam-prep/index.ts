@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encode as encodeBase64 } from "https://deno.land/std@0.224.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -81,15 +82,10 @@ async function handleUpload(req: Request, supabase: any) {
     return jsonResponse({ error: "AI not configured" }, 500);
   }
 
-  // Convert PDF to base64 for AI processing (chunked to avoid stack overflow)
+  // Convert PDF to base64 for AI processing
   const arrayBuffer = await file.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
-  let binary = "";
-  const chunkSize = 8192;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  const base64 = btoa(binary);
+  const base64 = encodeBase64(bytes);
 
   // Use Gemini to extract questions from the PDF
   console.log("Extracting questions from PDF via AI...");
