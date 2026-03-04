@@ -1,5 +1,5 @@
 import { NavLink, useLocation } from 'react-router-dom';
-import { Home, Bot, Route, BookOpen, User, MessageCircle, GraduationCap } from 'lucide-react';
+import { Home, Bot, Route, BookOpen, User, MessageCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const WHATSAPP_LINK = 'https://chat.whatsapp.com/EGPOEczL2AKG5bbKAcaiP4';
@@ -9,7 +9,6 @@ const navItems = [
   { path: '/ai-bot', icon: Bot, label: 'AI Bot' },
   { path: '/learning-path', icon: Route, label: 'Path' },
   { path: '/courses', icon: BookOpen, label: 'Courses' },
-  { path: '/exam-prep', icon: GraduationCap, label: 'Exam Prep' },
   { path: '/profile', icon: User, label: 'Profile' },
 ];
 

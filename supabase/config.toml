@@ -2,6 +2,3 @@ project_id = "zanscmidhwdyrztyzxqg"
 
 [functions.chat]
 verify_jwt = false
-
-[functions.exam-prep]
-verify_jwt = false
